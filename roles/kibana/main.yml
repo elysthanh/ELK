@@ -1,0 +1,120 @@
+---
+# tasks file for kibana
+    - name: Install Kibana package
+      ansible.builtin.apt:
+        name: kibana
+        state: present
+      register: kibana_install_results
+      failed_when: kibana_install_results.failed
+
+    - name: Notify success
+      debug:
+        msg: "Kibana installation completed successfully."
+      when: kibana_install_results is succeeded
+
+    - name: Notify failure
+      debug:
+        msg: "Kibana installation failed."
+      when: kibana_install_results is failed
+
+    - name: Run Elasticsearch Create Enrollment Token Command
+      shell: /usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s kibana
+      register: token_response
+
+    - name: Extract Token from Response
+      set_fact:
+        enrollment_token: "{{ token_response.stdout }}"
+
+    - name: Run Kibana Enrollment Token Command
+      shell: /usr/share/kibana/bin/kibana-setup --enrollment-token {{ enrollment_token }}
+      args:
+        stdin: "y\n"
+
+    - name: Update Kibana Configuration File
+      lineinfile:
+        path: /etc/kibana/kibana.yml
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: '^server\.port:', line: 'server.port: 5601' }
+        - { regexp: '^server\.host:', line: 'server.host: "0.0.0.0"' }
+        - { regexp: '^server\.ssl\.enabled:', line: 'server.ssl.enabled: true' }
+        - { regexp: '^server\.ssl\.certificate:', line: 'server.ssl.certificate: /etc/kibana/ca.crt.pem' }
+        - { regexp: '^server\.ssl\.key:', line: 'server.ssl.key: /etc/kibana/ca.key.pem' }
+        - { regexp: '^elasticsearch\.hosts:', line: 'elasticsearch.hosts: ["https://192.168.112.148:9200"]' }
+        - { regexp: '^elasticsearch\.ssl\.certificateAuthorities:', line: 'elasticsearch.ssl.certificateAuthorities: /etc/kibana/ca.crt.pem ' }
+
+    - name: Get secure_password
+      shell: /usr/share/elasticsearch/bin/elasticsearch-keystore show xpack.security.http.ssl.keystore.secure_password
+      register: secure_password_output
+
+    - name: Extract secure_password_output
+      set_fact:
+        secure_pass: "{{ secure_password_output.stdout.strip() }}"
+
+    - name: Create cert
+      shell: "echo '{{ secure_pass }}' | openssl pkcs12 -in /etc/elasticsearch/certs/http.p12 -out /etc/elasticsearch/certs/ca.crt.pem -clcerts -nokeys -passin stdin"
+
+    - name: Create key
+      shell: "echo '{{ secure_pass }}' | openssl pkcs12 -in /etc/elasticsearch/certs/http.p12 -out /etc/elasticsearch/certs/ca.key.pem -nocerts -nodes -passin stdin"
+
+    - name: Set key file permissions
+      file:
+        path: /etc/elasticsearch/certs/ca.key.pem
+        owner: root
+        group: root
+        mode: '777'
+
+    - name: Set cert file permissions
+      file:
+        path: /etc/elasticsearch/certs/ca.crt.pem
+        owner: root
+        group: root
+        mode: '777'
+
+    - name: Fetch key files from remote host
+      fetch:
+        src: /etc/elasticsearch/certs/ca.key.pem
+        dest: /etc/ansible/roles/logstash/templates/
+        flat: yes
+
+    - name: Fetch certificate files from remote host
+      fetch:
+        src: /etc/elasticsearch/certs/ca.crt.pem
+        dest: /etc/ansible/roles/logstash/templates/
+        flat: yes
+
+    - name: Copy cert files to Kibana directory
+      shell: cp /etc/elasticsearch/certs/ca.* /etc/kibana
+
+    - name: Set key file permissions for kibana
+      file:
+        path: /etc/kibana/ca.key.pem
+        owner: root
+        group: root
+        mode: '777'
+
+    - name: Set cert file permissions for kibana
+      file:
+        path: /etc/kibana/ca.crt.pem
+        owner: root
+        group: root
+        mode: '777'
+
+    - name: Enable and start kibana service
+      service:
+        name: kibana
+        state: started
+        enabled: yes
+      register: kibana_start_results
+      failed_when: kibana_start_results.failed
+
+    - name: Notify success
+      debug:
+        msg: "Kibana start completed successfully."
+      when: kibana_start_results is succeeded
+
+    - name: Kibana failure
+      debug:
+        msg: "Kibana start failed."
+      when: kibana_start_results is failed

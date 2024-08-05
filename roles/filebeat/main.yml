@@ -1,0 +1,191 @@
+---
+    - name: Comment out CD-ROM source in apt sources list
+      lineinfile:
+        path: /etc/apt/sources.list
+        regexp: '^deb'
+        line: '# deb'
+        state: present
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install apt package requirements
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: present
+        update_cache: yes
+      loop:
+        - gpg-agent
+        - curl
+        - procps
+        - net-tools
+        - gnupg
+        - apt-transport-https
+      register: apt_install_results
+      failed_when: apt_install_results.failed
+
+    - name: Notify success
+      debug:
+        msg: "apt package installation completed successfully."
+      when: apt_install_results is succeeded
+
+    - name: Notify failure
+      debug:
+        msg: "apt package installation failed."
+      when: apt_install_results is failed
+
+    - name: Add Elasticsearch GPG key
+      ansible.builtin.apt_key:
+        url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        state: present
+        keyring: /usr/share/keyrings/elasticsearch-keyring.gpg
+
+    - name: Add Elasticsearch repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main"
+        state: present
+        filename: 'elastic-8.x'
+
+    - name: Install Filebeat package
+      ansible.builtin.apt:
+        name: filebeat
+        state: present
+      register: filebeat_install_results
+      failed_when: filebeat_install_results.failed
+
+    - name: Notify success
+      debug:
+        msg: "Filebeat installation completed successfully."
+      when: filebeat_install_results is succeeded
+
+    - name: Notify failure
+      debug:
+        msg: "Filebeat package installation failed."
+      when: filebeat_install_results is failed
+
+    - name: create file pw
+      shell: touch /etc/filebeat/password.txt
+
+    - name: transform pass to filebeat
+      ansible.builtin.template:
+        src: /etc/ansible/roles/logstash/templates/password.txt
+        dest: /etc/filebeat/password.txt
+        owner: filebeat
+        group: filebeat
+        mode: '0644'
+
+    - name: Read elastic_password from file
+      slurp:
+        src: "/etc/filebeat/password.txt"
+      register: fb_password
+
+    - name: Set elastic_password for Filebeat
+      set_fact:
+        elastic_password: "{{ fb_password['content'] | b64decode }}"
+
+    - name: transform key file
+      ansible.builtin.template:
+        src: CA1.key.pem
+        dest: /etc/filebeat/
+        owner: filebeat
+        group: filebeat
+        mode: '0644'
+
+    - name: transform pass
+      ansible.builtin.template:
+        src: CA1.crt.pem
+        dest: /etc/filebeat/
+        owner: filebeat
+        group: filebeat
+        mode: '0644'
+
+    - name: Set key file permissions for filebeat
+      file:
+        path: /etc/filebeat/CA1.key.pem
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Set crt file permissions for filebeat
+      file:
+        path: /etc/filebeat/CA1.crt.pem
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: config yml filebeat
+      ansible.builtin.template:
+        src: filebeat1.yml
+        dest: /etc/filebeat/filebeat.yml
+        owner: filebeat
+        group: filebeat
+        mode: '0644'
+
+    - name: Ensure correct permissions for Filebeat config
+      file:
+        path: /etc/filebeat/filebeat.yml
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Start Filebeat service
+      ansible.builtin.service:
+        name: filebeat
+        state: started
+        enabled: yes
+
+    - name: Load Kibana Dashboard
+      command: filebeat setup -e
+      register: filebeat_setup_result
+      failed_when: filebeat_setup_result.rc != 0
+
+    - name: Notify Filebeat Setup Success
+      debug:
+        msg: "Load Kibana Dashboard successfully."
+      when: filebeat_setup_result.rc == 0
+
+    - name: Notify Filebeat Setup Failure
+      debug:
+        msg: "Filebeat setup failed with return code {{ filebeat_setup_result.rc }}."
+      when: filebeat_setup_result.rc != 0
+
+    - name: config yml filebeat
+      ansible.builtin.template:
+        src: filebeat2.yml
+        dest: /etc/filebeat/filebeat.yml
+        owner: filebeat
+        group: filebeat
+        mode: '0644'
+
+    - name: Ensure correct permissions for Filebeat config vol2
+      file:
+        path: /etc/filebeat/filebeat.yml
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Test Filebeat Output
+      command: filebeat test output
+      register: filebeat_test_output
+      failed_when: filebeat_test_output.rc != 0
+
+    - name: Notify Filebeat Output Test Success
+      debug:
+        msg: "Filebeat output test succeeded: {{ filebeat_test_output.stdout }}"
+      when: filebeat_test_output.rc == 0
+
+    - name: Notify Filebeat Output Test Failure
+      debug:
+        msg: "Filebeat output test failed: {{ filebeat_test_output.stderr }}"
+      when: filebeat_test_output.rc != 0
+
+    - name: Restart Filebeat service
+      ansible.builtin.service:
+        name: filebeat
+        state: restarted
+        enabled: yes
+
+    - name: Print the elastic_password
+      debug:
+        msg: "The Elasticsearch password to filebeat: {{ elastic_password }}"

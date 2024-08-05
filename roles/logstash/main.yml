@@ -1,0 +1,233 @@
+---
+    - name: Comment out CD-ROM source in apt sources list
+      lineinfile:
+        path: /etc/apt/sources.list
+        regexp: '^deb'
+        line: '# deb'
+        state: present
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install apt package requirements
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: present
+        update_cache: yes
+      loop:
+        - gpg-agent
+        - curl
+        - procps
+        - net-tools
+        - gnupg
+        - apt-transport-https
+      register: apt_install_results
+      failed_when: apt_install_results.failed
+
+    - name: Notify success
+      debug:
+        msg: "apt package installation completed successfully."
+      when: apt_install_results is succeeded
+
+    - name: Notify failure
+      debug:
+        msg: "apt package installation failed."
+      when: apt_install_results is failed
+
+    - name: Add Elasticsearch GPG key
+      ansible.builtin.apt_key:
+        url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        state: present
+        keyring: /usr/share/keyrings/elasticsearch-keyring.gpg
+
+    - name: Add Elasticsearch repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main"
+        state: present
+        filename: 'elastic-8.x'
+
+    - name: Install Logstash package
+      ansible.builtin.apt:
+        name: logstash
+        state: present
+      register: logstash_install_results
+      failed_when: logstash_install_results.failed
+
+    - name: Notify success
+      debug:
+        msg: "Logstash installation completed successfully."
+      when: logstash_install_results is succeeded
+
+    - name: Notify failure
+      debug:
+        msg: "Logstash package installation failed."
+      when: logstash_install_results is failed
+
+    - name: Generate a Private Key
+      command: openssl genpkey -algorithm RSA -out /etc/logstash/CA1.key.pem
+      args:
+        creates: /etc/logstash/CA1.key.pem
+      register: key_generation_result
+      failed_when: key_generation_result.rc != 0
+
+    - name: Generate a Certificate Signing Request (CSR)
+      command: openssl req -new -key /etc/logstash/CA1.key.pem -out /etc/logstash/request.csr -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=192.168.112.149"
+      args:
+        creates: /etc/logstash/request.csr
+      register: csr_generation_result
+      failed_when: csr_generation_result.rc != 0
+
+    - name: Generate a Self-Signed Certificate
+      command: openssl x509 -req -days 365 -in /etc/logstash/request.csr -signkey /etc/logstash/CA1.key.pem -out /etc/logstash/CA1.crt.pem
+      args:
+        creates: /etc/logstash/CA1.crt.pem
+      register: cert_generation_result
+      failed_when: cert_generation_result.rc != 0
+
+    - name: Remove the CSR file
+      file:
+        path: /etc/logstash/request.csr
+        state: absent
+
+    - name: Set permissions for private key
+      file:
+        path: /etc/logstash/CA1.key.pem
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Set permissions for certificate
+      file:
+        path: /etc/logstash/CA1.crt.pem
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Fetch key files from remote host
+      fetch:
+        src: /etc/logstash/CA1.key.pem
+        dest: /etc/ansible/roles/filebeat/templates/
+        flat: yes
+
+    - name: Fetch certificate files from remote host
+      fetch:
+        src: /etc/logstash/CA1.crt.pem
+        dest: /etc/ansible/roles/filebeat/templates/
+        flat: yes
+
+    - name: Decrypt the private key
+      command: openssl rsa -in /etc/logstash/CA1.key.pem -out /etc/logstash/CA2.key.pem -passin pass:thanh
+      args:
+        creates: /etc/logstash/CA2.key.pem
+
+    - name: Set permissions for decrypted private key
+      file:
+        path: /etc/logstash/CA2.key.pem
+        owner: root
+        group: root
+        mode: '0600'
+
+
+    - name: create file
+      shell: touch /etc/logstash/password.txt
+
+    - name: transform pass
+      ansible.builtin.template:
+        src: /etc/ansible/roles/logstash/templates/password.txt
+        dest: /etc/logstash/password.txt
+        owner: logstash
+        group: logstash
+        mode: '0644'
+
+    - name: Read elastic_password from file
+      slurp:
+        src: "/etc/logstash/password.txt"
+      register: slurped_password
+
+    - name: Set elastic_password for Logstash
+      set_fact:
+        elastic_password: "{{ slurped_password['content'] | b64decode }}"
+
+    - name: Print the elastic_password
+      debug:
+        msg: "The Elasticsearch password is: {{ elastic_password }}"
+
+    - name: Copy Logstash Input Configuration
+      ansible.builtin.template:
+        src: logstash.conf
+        dest: /etc/logstash/conf.d/logstash.conf
+        mode: 777
+        owner: logstash
+        group: logstash
+
+    - name: transform key file
+      ansible.builtin.template:
+        src: ca.key.pem
+        dest: /etc/logstash/
+        owner: logstash
+        group: logstash
+        mode: '0644'
+
+    - name: transform pass
+      ansible.builtin.template:
+        src: ca.crt.pem
+        dest: /etc/logstash/
+        owner: logstash
+        group: logstash
+        mode: '0644'
+
+    - name: Set key file permissions for logstash
+      file:
+        path: /etc/logstash/ca.key.pem
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Set crt file permissions for logstash
+      file:
+        path: /etc/logstash/ca.crt.pem
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Enable and start logstash service
+      service:
+        name: logstash
+        state: started
+        enabled: yes
+      register: logstash_status
+
+    - name: Run Logstash in the background
+      shell: nohup /usr/share/logstash/bin/logstash -f /etc/logstash/conf.d/logstash.conf > /var/log/logstash.log 2>&1 &
+      args:
+        chdir: /usr/share/logstash/bin
+      ignore_errors: yes
+
+    - name: Wait for Logstash to complete
+      command: sleep 120
+
+    - name: Ensure Logstash is running
+      shell: pgrep -f logstash
+      register: logstash_process
+      retries: 10
+      delay: 10
+      until: logstash_process.rc == 0
+
+    - name: Check Logstash log file
+      command: tail -n 10 /var/log/logstash.log
+      register: logstash_log
+      failed_when: logstash_log.rc != 0
+
+    - name: Display Logstash log file
+      debug:
+        msg: "{{ logstash_log.stdout }}"
+
+    - name: Check if Logstash is running
+      ansible.builtin.debug:
+        msg: "Logstash is running"
+      when: logstash_status.status.ActiveState == 'active'
+
+    - name: Notify about Logstash start
+      ansible.builtin.debug:
+        msg: "Logstash started successfully."

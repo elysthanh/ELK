@@ -1,0 +1,18 @@
+enabled: true
+enabled: true
+keystore.path: certs/http.p12
+keystore.path: certs/transport.p12
+truststore.path: certs/transport.p12
+verification_mode: certificate
+cluster.name: my-application
+discovery.type: single-node
+http.host: 0.0.0.0
+http.port: 9200
+network.host: 0.0.0.0
+node.name: node-1
+path.data: /var/lib/elasticsearch
+path.logs: /var/log/elasticsearch
+xpack.security.enabled: true
+xpack.security.enrollment.enabled: true
+xpack.security.http.ssl:
+xpack.security.transport.ssl:
