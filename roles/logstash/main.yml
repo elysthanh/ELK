@@ -116,19 +116,6 @@
         dest: /etc/ansible/roles/filebeat/templates/
         flat: yes
 
-    - name: Decrypt the private key
-      command: openssl rsa -in /etc/logstash/CA1.key.pem -out /etc/logstash/CA2.key.pem -passin pass:thanh
-      args:
-        creates: /etc/logstash/CA2.key.pem
-
-    - name: Set permissions for decrypted private key
-      file:
-        path: /etc/logstash/CA2.key.pem
-        owner: root
-        group: root
-        mode: '0600'
-
-
     - name: create file
       shell: touch /etc/logstash/password.txt
 
@@ -205,7 +192,7 @@
       ignore_errors: yes
 
     - name: Wait for Logstash to complete
-      command: sleep 60
+      command: sleep 120
 
     - name: Ensure Logstash is running
       shell: pgrep -f logstash
