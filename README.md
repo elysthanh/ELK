@@ -2,10 +2,10 @@
 
 #set roles using galaxy module ansible 
 
-$ ansible-galaxy init elastic                                                                                           
+  $ ansible-galaxy init elastic                                                                                           
 
-$ ansible-galaxy init kibana			
+  $ ansible-galaxy init kibana			
 
-$ ansible-galaxy init logstash
+  $ ansible-galaxy init logstash
 
-$ ansible-galaxy init filebeat
+  $ ansible-galaxy init filebeat
