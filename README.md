@@ -5,3 +5,4 @@ $ ansible-galaxy init elastic
 $ ansible-galaxy init kibana
 $ ansible-galaxy init logstash
 $ ansible-galaxy init filebeat
+##
