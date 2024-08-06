@@ -205,7 +205,7 @@
       ignore_errors: yes
 
     - name: Wait for Logstash to complete
-      command: sleep 120
+      command: sleep 60
 
     - name: Ensure Logstash is running
       shell: pgrep -f logstash
