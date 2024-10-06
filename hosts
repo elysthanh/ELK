@@ -1,0 +1,8 @@
+[elastic]
+192.168.112.148 ansible_user=elastic ansible_password=123456 ansible_become_password=123456
+
+[logstash]
+192.168.112.149 ansible_user=logstash ansible_password=123456 ansible_become_password=123456
+
+[filebeat]
+192.168.112.150 ansible_user=filebeat ansible_password=123456 ansible_become_password=123456
